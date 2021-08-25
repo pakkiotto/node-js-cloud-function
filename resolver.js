@@ -3,8 +3,14 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const path = require("path");
 const config = require('./config');
+const Firestore = require('@google-cloud/firestore');
 
-async function initOrUpdateDb(){
+const db = new Firestore({
+  projectId: 'glass-indexer-323910',
+  keyFilename: './keyfile.json',
+});
+
+async function initOrUpdateMongoDb(){
     console.log("start main method = " + new Date())
     const squads = config.squads;
     for(squad of squads){
@@ -17,6 +23,21 @@ async function initOrUpdateDb(){
     }
     console.log("end main method = " + new Date())
     return config;
+}
+
+async function initOrUpdateCloudDb(){
+  console.log("start main method = " + new Date())
+  const squads = config.squads;
+  for(squad of squads){
+      await timeout(1000);
+      console.log("exec: " + squad.name + " at: " + new Date());
+      const playersRetrieved = await getPlayersFromSquad(squad);
+      for(toSave of playersRetrieved){
+        await savePlayerOnCloudDb(toSave);
+      }
+  }
+  console.log("end main method = " + new Date())
+  return config;
 }
 
 async function getPlayersFromSquad(squadIn){
@@ -43,6 +64,29 @@ async function savePlayerOnDb(toSave){
             }
           })
           .catch(err => console.log(err))
+}
+
+async function savePlayerOnCloudDb(toSave){
+
+  const docId = toSave._id.toString();
+  console.log(docId)
+  const created = new Date().getTime();
+   await db.collection("player").doc(docId).set({
+      created,
+      tid: toSave._id,
+      name: toSave.name,
+      squad: toSave.squad,
+      role: toSave.role,
+      roleDetailed: toSave.roleDetailed,
+      squad_id: toSave.squad_id,
+      number: toSave.number,
+      nationality: toSave.nationality,
+      marketValue: toSave.marketValue
+    }).then(doc => {
+      console.info('stored new doc id#', doc.id);
+    }).catch(err => {
+      console.error(err);
+    });
 }
 
 function timeout(ms) {
@@ -87,4 +131,20 @@ function buildPlayersFromResponse(response, squadId){
   return players;
 }
 
-module.exports = { initOrUpdateDb };
+async function getAll(role, nationality){
+  console.log("start main method = " + new Date())
+  console.log("nationality = "+ nationality + " role = " + role)
+
+   const players = await db.collection("player")
+   .where('nationality', 'array-contains-any', nationality)
+   .where('role', '==', role)
+   .get()
+  
+   //console.log(players.docs.map(doc => doc.data()));
+
+   const playersFiltered = players.docs.map(doc => doc.data());
+  
+  return playersFiltered;
+}
+
+module.exports = { initOrUpdateMongoDb, initOrUpdateCloudDb, getAll };
